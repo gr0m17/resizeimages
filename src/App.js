@@ -7,18 +7,14 @@ export default class App extends React.Component {
     super(...args);
     this.compressImage = this.compressImage.bind(this);
     this.handleChange = this.handleChange.bind(this);
+    this.initializer = this.initializer.bind(this);
     this.state = {
+      files: {},
+      outputFiles: [],
       rendered: false,
       maxSizeKB: 5,
       maxWidthOrHeight: 20000,
-      webWorker: {
-        fileName: null,
-        progress: null,
-        inputSize: null,
-        outputSize: null,
-        inputUrl: null,
-        outputUrl: null,
-      },
+
       mainThread: {
         progress: null,
         inputSize: null,
@@ -50,30 +46,47 @@ export default class App extends React.Component {
     const targetName = useWebWorker ? "webWorker" : "mainThread";
     this.setState((prevState) => ({
       ...prevState,
-      [targetName]: {git
-        ...prevState[targetName],
-        progress: p,
-      },
+      mainThread: { ...prevState.mainThread, progress: p },
     }));
   }
 
-  async compressImage(event, useWebWorker) {
-    this.setState({ rendered: false });
-    const file = event.target.files[0];
+  async handleImageSelection(event, useWebWorker) {
+    const files = event.target.files;
+    console.log({ files: files });
+    this.setState({ files: files });
+  }
+
+  initializer(event) {
+    event.preventDefault();
+    const filelist = [...this.state.files];
+
+    console.log(filelist);
+    filelist.forEach((fileLocation) => {
+      this.compressImage(fileLocation, false);
+    });
+  }
+
+  async compressImage(fileLocation, useWebWorker) {
+    // const file = event.target.files[0];
+    const file = fileLocation;
+
     console.log("input", file);
     console.log(
       "ExifOrientation",
       await imageCompression.getExifOrientation(file)
     );
-    const targetName = useWebWorker ? "webWorker" : "mainThread";
+
+    const targetName = "mainThread";
+    const inputUrl = URL.createObjectURL(file);
     this.setState((prevState) => ({
       ...prevState,
-      [targetName]: {
-        ...prevState[targetName],
+      mainThread: {
+        ...prevState.mainThread,
         inputSize: (file.size / 1024 / 1024).toFixed(2),
-        inputUrl: URL.createObjectURL(file),
+        inputUrl: inputUrl,
       },
     }));
+    //todo: make this better:
     var options = {
       maxIteration: 100,
       alwaysKeepResolution: 1,
@@ -83,21 +96,32 @@ export default class App extends React.Component {
       onProgress: (p) => this.onProgress(p, useWebWorker),
     };
     const output = await imageCompression(file, options);
+
+    const compressedFile = {
+      originalImage: inputUrl,
+      name: output.name,
+      url: URL.createObjectURL(output),
+      inputSize: file.size,
+      outputSize: output.size,
+    };
+
+    this.setState({ outputFiles: [...this.state.outputFiles, compressedFile] });
+
     console.log("output", output);
     this.setState({ fileName: output.name });
-    this.setState({ rendered: true });
     this.setState((prevState) => ({
       ...prevState,
-      [targetName]: {
-        ...prevState[targetName],
+      mainThread: {
+        ...prevState.mainThread,
         outputSize: (output.size / 1024 / 1024).toFixed(5),
         outputUrl: URL.createObjectURL(output),
       },
     }));
+    console.log(this.state);
   }
 
   render() {
-    const { webWorker, mainThread, maxSizeKB } = this.state;
+    const { mainThread, maxSizeKB } = this.state;
     return (
       <div className="App">
         <div>
@@ -121,74 +145,73 @@ export default class App extends React.Component {
             Browsers based compression{" "}
             <input
               id="main-thread"
+              multiple="multiple"
               type="file"
               accept="image/*"
-              onChange={(e) => this.compressImage(e, false)}
+              onChange={(e) => this.handleImageSelection(e, false)}
             />
+            <input type="submit" onClick={this.initializer} />
           </label>
+
           <p>
-            {" "}
-            {mainThread.inputSize && (
-              <span>Source image size: {mainThread.inputSize * 1024} kb</span>
-            )}
+            <table>
+              {this.state.outputFiles.length > 0 &&
+                this.state.outputFiles.map((element) => {
+                  return (
+                    <tr>
+                      <td>
+                        Source image size:
+                        {(element.inputSize / 1024).toFixed(2)}
+                        kb
+                        <br />
+                        <img src={element.originalImage} />
+                      </td>
+                      <td>
+                        Output image size:
+                        {(element.outputSize / 1024).toFixed(2)}
+                        kb.{" "}
+                        <a href={element.url} download={element.name}>
+                          [download compressed image]
+                        </a>
+                        <br />
+                        <img src={element.url} />
+                      </td>
+                    </tr>
+                  );
+                })}
+            </table>
             <br />
             {mainThread.progress && this.state.rendered === false && (
               <span>Compressing... {mainThread.progress} %</span>
             )}
-            {mainThread.outputSize && this.state.rendered === true && (
-              <span>
-                Output image size: {mainThread.outputSize * 1024} kb.
-                <br /> compressed size:
-                {(mainThread.outputSize / mainThread.inputSize).toFixed(2)}% of
-                original!
-                <br />
-                Maximum filesize:{maxSizeKB} KB
-                <br /> actual achieved size:
-                {Math.round(mainThread.outputSize * 1024)} KB
-                <br />
-                {Math.round(mainThread.outputSize * 1024) > maxSizeKB
-                  ? "Error: Failed to compress to desired file size."
-                  : "success!"}
-              </span>
-            )}
           </p>
         </div>
-        {(mainThread.inputUrl || webWorker.inputUrl) &&
-          this.state.rendered === true && (
-            <table>
-              <thead>
-                <tr>
-                  <td>input preview</td>
-                  <td>
-                    output preview{" "}
-                    <a
-                      href={mainThread.outputUrl}
-                      download={this.state.fileName}
-                    >
-                      [download compressed image]
-                    </a>
-                    <br />
-                  </td>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>
-                    <img
-                      src={mainThread.inputUrl || webWorker.inputUrl}
-                      alt="input"
-                    />
-                  </td>
-                  <td>
-                    <img
-                      src={mainThread.outputUrl || webWorker.outputUrl}
-                      alt="output"
-                    />
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          )}
+        {mainThread.inputUrl && this.state.rendered === true && (
+          <table>
+            <thead>
+              <tr>
+                <td>input preview</td>
+                <td>
+                  output preview{" "}
+                  <a href={mainThread.outputUrl} download={this.state.fileName}>
+                    [download compressed image]
+                  </a>
+                  <br />
+                </td>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <img src={mainThread.inputUrl} alt="input" />
+                </td>
+                <td>
+                  <img src={mainThread.outputUrl} alt="output" />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        )}
       </div>
     );
   }
